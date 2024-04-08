@@ -1,0 +1,78 @@
+common:
+  dataset: "nclt"
+  lid_topic:  "/hesai/pandar"
+  imu_topic:  "/imu/data"
+  time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
+
+preprocess:
+  lidar_type: 2                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR,
+  scan_line: 32
+  blind: 4
+  time_scale: 1e-3             # 兼容不同数据集的时间单位，仅对Velodyne LiDAR(lidar_type=2)生效
+
+mapping:
+  acc_cov: 0.1
+  gyr_cov: 0.1
+  b_acc_cov: 0.0001
+  b_gyr_cov: 0.0001
+  fov_degree: 180
+  det_range: 100.0
+  extrinsic_est_en: false      # true: enable the online estimation of IMU-LiDAR extrinsic
+  #四足
+  extrinsic_T: [ 0.039474 ,-0.034314 ,-0.134198] #[-0.0704971, -0.00583031, -0.0628317]
+
+  extrinsic_R: [ 0.1073609, 0.9899136, 0.0924377,
+              -0.9828152, 0.0916274, 0.1602456,
+              0.1501595, -0.1080533, 0.9827393 ]
+
+publish:
+  path_publish_en: false
+  scan_publish_en: true       # false: close all the point cloud output
+  scan_effect_pub_en: true    # true: publish the pointscloud of effect point
+  dense_publish_en: false       # false: low down the points number in a global-frame point clouds scan.
+  scan_bodyframe_pub_en: true  # true: output the point cloud scans in IMU-body-frame
+
+path_save_en: true                 # 保存轨迹，用于精度计算和比较
+
+pcd_save:
+  pcd_save_en: true
+  interval: -1                 # how many LiDAR frames saved in each pcd file;
+  # -1 : all frames will be saved in ONE pcd file, may lead to memory crash when having too much frames.
+
+feature_extract_enable: true
+point_filter_num: 6
+max_iteration: 3
+filter_size_surf: 0.5
+filter_size_map: 0.5
+cube_side_length: 1000
+
+ivox_grid_resolution: 0.5        # default=0.2
+ivox_nearby_type: 18             # 6, 18, 26
+esti_plane_threshold: 0.1        # default=0.1
+
+
+#outdoor
+
+n_threads: 8
+
+
+edge: true
+intensity_edge: true
+plane: true
+blob: false
+
+max_points: 1000                   # Maximum number of keypoints of each type to extract
+voxel_grid_resolution: 2.          # [m/voxel] Size of a voxel to downsample the extracted keypoints
+input_sampling_ratio: 1.           # Ratio of points from which to extract the keypoints (for computation time issues)
+min_distance_to_sensor: 1.5        # [m] Minimal point to sensor distance to consider a point as valid.
+max_distance_to_sensor: 200.       # [m] Maximal point to sensor distance to consider a point as valid.
+min_azimuth: 0.                    # [°] Minimal azimuth angle to consider the point as keypoint. Right thumb rule between min/max azimuth angles.
+max_azimuth: 360.                  # [°] Maximal azimuth angle to consider the point as keypoint. Right thumb rule between min/max azimuth angles.
+min_beam_surface_angle: 10.        # [°] Minimal angle between the point surface and the laser beam to consider a point as valid.
+neighbors_side_nb: 4               # [>1] Minimum number of neighbors used on each side to estimate curvature and detect edges and planes.
+neighbors_radius: 0.10             # [m] Minimum radius to define a neighborhood on each side of the studied point.
+plane_sin_angle_threshold: 0.5     # [0-1] Sharpness threshold to select a planar keypoint (selected if sin angle is less than threshold).
+edge_sin_angle_threshold: 0.86     # [0-1] Sharpness threshold to select an edge keypoint (selected if sin angle is more than threshold).
+edge_depth_gap_threshold: 1.       # [m] Threshold upon depth gap in neighborhood to select an edge keypoint.
+edge_nb_gap_points: 10             # [points] Minimum number of successive missing points to consider a space gap.
+edge_intensity_gap_threshold: 50.  # [0-255] Threshold upon intensity gap to select an edge keypoint.
