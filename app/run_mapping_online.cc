@@ -22,7 +22,9 @@ int main(int argc, char **argv) {
 
     ros::init(argc, argv, "msclio");
     ros::NodeHandle nh;
+    // ros::NodeHandle pnh("~");
 
+    // 到这一步已经初始化好laser_mapping对象了
     auto laser_mapping = std::make_shared<msclio::LaserMapping>();
     laser_mapping->InitROS(nh);
 

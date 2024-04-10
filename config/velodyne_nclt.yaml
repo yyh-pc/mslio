@@ -1,8 +1,8 @@
 #没有nclt的参数文件
 common:
   dataset: "nclt"
-  lid_topic:  "/hesai/pandar"
-  imu_topic:  "/imu/data"
+  lid_topic: "points_raw"
+  imu_topic: "imu_raw"
   time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
 
 preprocess:
@@ -19,12 +19,10 @@ mapping:
   fov_degree: 180
   det_range: 100.0
   extrinsic_est_en: false      # true: enable the online estimation of IMU-LiDAR extrinsic
-  #四足
-  extrinsic_T: [ 0.039474 ,-0.034314 ,-0.134198] #[-0.0704971, -0.00583031, -0.0628317]
-
-  extrinsic_R: [ 0.1073609, 0.9899136, 0.0924377,
-              -0.9828152, 0.0916274, 0.1602456,
-              0.1501595, -0.1080533, 0.9827393 ]
+  extrinsic_T: [ 0, 0, 0.28 ]
+  extrinsic_R: [ 1, 0, 0,
+                 0, 1, 0,
+                 0, 0, 1 ]
 
 publish:
   path_publish_en: false

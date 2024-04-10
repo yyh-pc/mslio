@@ -6,11 +6,16 @@
 #include "laser_mapping.h"
 #include "utils.h"
 
+#include <pcl/filters/extract_indices.h>
+#include <pcl/ModelCoefficients.h>
+#include <pcl/segmentation/sac_segmentation.h>
+
 using namespace std;
 using namespace LidarSlam;
 namespace msclio {
 
 bool LaserMapping::InitROS(ros::NodeHandle &nh) {
+    // ?:是先初始化特征提取器，还是先加载参数
     ke = std::make_shared<LidarSlam::SpinningSensorKeypointExtractor>();
     LoadParams(nh);
     SubAndPubToROS(nh);
@@ -18,6 +23,10 @@ bool LaserMapping::InitROS(ros::NodeHandle &nh) {
     // localmap init (after LoadParams)
     ivox_ = std::make_shared<IVoxType>(ivox_options_);
     ivox_corner = std::make_shared<IVoxType>(ivox_options_);
+
+    cout << "Operating patchwork++..." << endl;
+    PatchworkppGroundSeg.reset(new PatchWorkpp<PointType>(&nh));
+
 
     // esekf init
     std::vector<double> epsi(23, 0.001);
@@ -94,10 +103,8 @@ bool LaserMapping::LoadParams(ros::NodeHandle &nh) {
 
     };
     InitKeypointsExtractor();
-    // ROS_INFO_STREAM("Single LiDAR device setup");
-    // int maxpoints = ke->GetMaxPoints();
-    // cout << "----okokokookoko---" << maxpoints << endl;
-    // cout << "----okokokookoko---" << ke->GetNbThreads() << endl;
+    ROS_INFO_STREAM("ke extractor setup");
+    cout << "----ke->GetVoxelResolution--- " << ke->GetVoxelResolution() << endl;
 
     // 特征点使用类型
     for (auto k : KeypointTypes)
@@ -149,11 +156,13 @@ bool LaserMapping::LoadParams(ros::NodeHandle &nh) {
 
     nh.param<float>("ivox_grid_resolution", ivox_options_.resolution_, 0.2);
     nh.param<int>("ivox_nearby_type", ivox_nearby_type, 18);
+    nh.param<double>("ground_filter_distance", ground_filter_distance, 0.2);
 
 
     LOG(INFO) << "point_filter_num " << preprocess_->PointFilterNum();
     LOG(INFO) << "lidar_type" << lidar_type;
     LOG(INFO) << "feature_extract" << feature_extract;
+    LOG(INFO) << "ground_filter_distance " << ground_filter_distance;
     if (lidar_type == 1) {
         preprocess_->SetLidarType(LidarType::AVIA);
         LOG(INFO) << "Using AVIA Lidar";
@@ -320,6 +329,9 @@ void LaserMapping::SubAndPubToROS(ros::NodeHandle &nh) {
 
     pub_lidar_slam_corner = nh.advertise<sensor_msgs::PointCloud2>("/cloud_lidar_salm_corner", 100000);
     pub_lidar_slam_surf = nh.advertise<sensor_msgs::PointCloud2>("/cloud_lidar_salm_surf", 100000);
+
+    pub_scan_ground = nh.advertise<sensor_msgs::PointCloud2>("/cloud_scan_ground", 100000);
+    pub_scan_nonground = nh.advertise<sensor_msgs::PointCloud2>("/cloud_scan_nonground", 100000);
 }
 
 LaserMapping::LaserMapping() {
@@ -327,15 +339,18 @@ LaserMapping::LaserMapping() {
     p_imu_.reset(new ImuProcess());
 }
 
-
-void LaserMapping::PublishKeyPointsWorld(CloudS::Ptr &key_points, ros::Publisher& topic) {
+// 发布特征点云函数
+template<typename PointT> inline
+void LaserMapping::PublishKeyPointsWorld(pcl::PointCloud<PointT> &key_points, ros::Publisher& topic) {
     PointCloudType::Ptr laserCloudEdgeWorld;
-    CloudS::Ptr laserCloudEdgeRes(key_points);
-    int size = laserCloudEdgeRes->points.size();
+    // ?:这里我为什么要再复制一份出来
+    // CloudS::Ptr laserCloudEdgeRes(key_points);
+    // int size = laserCloudEdgeRes->points.size();
+    int size = key_points.size();
     laserCloudEdgeWorld.reset(new PointCloudType(size, 1));
     // 将当前帧点云转化到世界坐标系下
     for (int i = 0; i < size; i++) {
-        PointBodyToWorld(&laserCloudEdgeRes->points[i], &laserCloudEdgeWorld->points[i]);
+        PointBodyToWorld(&key_points.points[i], &laserCloudEdgeWorld->points[i]);
     }
 
     sensor_msgs::PointCloud2 laserCloudEdgemsg;
@@ -346,6 +361,29 @@ void LaserMapping::PublishKeyPointsWorld(CloudS::Ptr &key_points, ros::Publisher
     topic.publish(laserCloudEdgemsg);
     publish_count_ -= options::PUBFRAME_PERIOD;
 
+}
+
+void LaserMapping::filterPointCloudWithRANSAC(PointCloudType::Ptr &pcl_in, double distanceThreshold) {
+    pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
+    pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
+    pcl::SACSegmentation<PointType> seg;
+    seg.setOptimizeCoefficients(true);
+    seg.setModelType(pcl::SACMODEL_PLANE);
+    seg.setMethodType(pcl::SAC_RANSAC);
+    seg.setDistanceThreshold(distanceThreshold);
+    seg.setInputCloud(pcl_in);
+    seg.segment(*inliers, *coefficients);
+
+    if (inliers->indices.size() == 0) {
+        PCL_ERROR("Could not estimate a planar model for the given dataset.");
+        return;
+    }
+
+    pcl::ExtractIndices<PointType> extract;
+    extract.setInputCloud(pcl_in);
+    extract.setIndices(inliers);
+    extract.setNegative(false);
+    extract.filter(*pcl_in);
 }
 
 void LaserMapping::Run() {
@@ -360,13 +398,64 @@ void LaserMapping::Run() {
         return;
     }
 
+    // ground_remove->groundRemove(point_cloud, labels);
+
+
+
+    /// the first scan
+    if (flg_first_scan_) {
+        ivox_->AddPoints(scan_undistort_->points);
+        first_lidar_time_ = measures_.lidar_bag_time_;
+        flg_first_scan_ = false;
+        return;
+    }
+    flg_EKF_inited_ = (measures_.lidar_bag_time_ - first_lidar_time_) >= options::INIT_TIME;
+
+    /// downsample
+    Timer::Evaluate(
+        [&, this]() {
+            voxel_scan_.setInputCloud(scan_undistort_);
+            voxel_scan_.filter(*scan_down_body_);
+        },
+        "Downsample PointCloud");
+
+    int cur_pts = scan_down_body_->size();
+    if (cur_pts < 5) {
+        LOG(WARNING) << "Too few points, skip this scan!" << scan_undistort_->size() << ", " << scan_down_body_->size();
+        return;
+    }
+
+    // Step:地面点提取
+    PatchworkppGroundSeg->estimate_ground(*scan_down_body_, *scan_ground_, *scan_nonground_, time_taken);
+    LOG(WARNING) << "before z filter ground num is !" << scan_ground_->size();
+    // filterPointCloudWithRANSAC(scan_ground_, ground_filter_distance);
+
+    // z_mean = 0;
+    // for (int i = 0; i < scan_ground_->size(); i++) {
+    //     z_mean += scan_ground_->points[i].z;
+    // }
+    // z_mean = z_mean/scan_ground_->size();
+    // cout << "z_mean" << z_mean << endl;
+    for (int i = 0; i < scan_ground_->size(); i++) {
+        if(scan_ground_->points[i].z > ground_filter_distance) {
+            scan_nonground_->push_back(scan_ground_->points[i]);
+            // 将该点从点云队列中删除
+            scan_ground_->erase(scan_ground_->begin() + i);
+        }
+
+    }
+
+
+    ROS_INFO_STREAM("\033[1;32m" << "Input PointCloud: " << scan_down_body_->size() << " -> Ground: "
+                                     << scan_ground_->size() << "/ NonGround: " << scan_nonground_->size()
+                                     << " (running_time: " << 1000 * time_taken << " ms)" << "\033[0m");
     // 加一个判断是否需要特征提取
     if(feature_extract){
 
         // ?:有一个问题特征提取是在点云预处理里做还是在mapping点云去畸变之后做
         // Step:1将点云类型转化为lidarsalm所需的格式
         CloudS::Ptr cloudS_ptr(new CloudS);
-        for (int i = 0; i < scan_undistort_->size(); i++) {
+        for (int i = 0; i < scan_nonground_->size(); i++) {
             PointS lidar_point;
             PointType &point = scan_undistort_->points[i];
             lidar_point.x = point.x;
@@ -395,28 +484,6 @@ void LaserMapping::Run() {
 
     }
 
-    /// the first scan
-    if (flg_first_scan_) {
-        ivox_->AddPoints(scan_undistort_->points);
-        first_lidar_time_ = measures_.lidar_bag_time_;
-        flg_first_scan_ = false;
-        return;
-    }
-    flg_EKF_inited_ = (measures_.lidar_bag_time_ - first_lidar_time_) >= options::INIT_TIME;
-
-    /// downsample
-    Timer::Evaluate(
-        [&, this]() {
-            voxel_scan_.setInputCloud(scan_undistort_);
-            voxel_scan_.filter(*scan_down_body_);
-        },
-        "Downsample PointCloud");
-
-    int cur_pts = scan_down_body_->size();
-    if (cur_pts < 5) {
-        LOG(WARNING) << "Too few points, skip this scan!" << scan_undistort_->size() << ", " << scan_down_body_->size();
-        return;
-    }
     scan_down_world_->resize(cur_pts);
     nearest_points_.resize(cur_pts);
     residuals_.resize(cur_pts, 0);
@@ -439,8 +506,10 @@ void LaserMapping::Run() {
 
     if(feature_extract){
         // Step:3特征点可视化
-        PublishKeyPointsWorld(CurrentRawKeypoints[LidarSlam::EDGE], pub_lidar_slam_corner);
-        PublishKeyPointsWorld(CurrentRawKeypoints[LidarSlam::PLANE], pub_lidar_slam_surf);
+        PublishKeyPointsWorld(*CurrentRawKeypoints[LidarSlam::EDGE], pub_lidar_slam_corner);
+        PublishKeyPointsWorld(*CurrentRawKeypoints[LidarSlam::PLANE], pub_lidar_slam_surf);
+        PublishKeyPointsWorld(*scan_ground_, pub_scan_ground);
+        PublishKeyPointsWorld(*scan_nonground_, pub_scan_nonground);
         // 清空当前帧的特征点
         for (auto k : UsableKeypoints)
         {

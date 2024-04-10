@@ -20,6 +20,7 @@
 
 #include "keyPointsExtract/Utilities.h"
 #include "keyPointsExtract/SpinningSensorKeypointExtractor.h"
+#include <ros/ros.h>
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -151,8 +152,8 @@ void SpinningSensorKeypointExtractor::ComputeKeyPoints(const PointCloud::Ptr& pc
   // Labelize and extract keypoints
   // Warning : order matters
   // 通过对扫描线上的点进行随机采样，将采样后的点添加到关键点集合中的Blob类型中，用于表示斑点特征
-  if (this->Enabled[Keypoint::BLOB])
-    this->ComputeBlobs();
+  // if (this->Enabled[Keypoint::BLOB])
+  //   this->ComputeBlobs();
   if (this->Enabled[Keypoint::PLANE])
     this->ComputePlanes();
   // 利用深度间隙、空间间隙、以及角度来筛选角点
@@ -687,6 +688,7 @@ void SpinningSensorKeypointExtractor::EstimateAzimuthalResolution()
     maxAngle = std::min(medianAngle * 2., maxAngle / 1.8);
   }
   this->AzimuthalResolution = medianAngle;
+  ROS_INFO_STREAM("\033[1;32m" << "LiDAR's azimuthal resolution estimated to " << "\033[0m");
   std::cout << "LiDAR's azimuthal resolution estimated to " << Utils::Rad2Deg(this->AzimuthalResolution) << "°" << std::endl;
 }
 

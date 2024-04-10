@@ -1,3 +1,5 @@
+add_subdirectory(include/jsk_recognition_msgs)
+
 cmake_minimum_required(VERSION 3.5)
 project(msclio)
 
@@ -29,5 +31,6 @@ else ()
     message("USING_IVOX_NODE_TYPE_DEFAULT")
 endif()
 
+# 添加编译子目录
 add_subdirectory(src)
 add_subdirectory(app)

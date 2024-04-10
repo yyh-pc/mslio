@@ -3,7 +3,7 @@
 
     <arg name="rviz" default="true" />
 
-    <rosparam command="load" file="$(find msclio)/config/velodyne.yaml" />
+    <rosparam command="load" file="$(find msclio)/config/velodyne_nclt.yaml" />
     <!-- 加载地面提取patchwork相关参数，注意这个每一个launch文件都要加之后 -->
     <rosparam command="load" file="$(find msclio)/config/ground.yaml" />
 

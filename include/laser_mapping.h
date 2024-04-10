@@ -14,6 +14,7 @@
 #include "options.h"
 #include "pointcloud_preprocess.h"
 #include "keyPointsExtract/SpinningSensorKeypointExtractor.h"
+#include "patchworkpp/patchworkpp.hpp"
 
 namespace msclio {
 
@@ -32,6 +33,8 @@ class LaserMapping {
         scan_down_body_ = nullptr;
         scan_undistort_ = nullptr;
         scan_down_world_ = nullptr;
+        scan_ground_ = nullptr;
+        scan_nonground_ = nullptr;
         LOG(INFO) << "laser mapping deconstruct";
     }
 
@@ -63,7 +66,9 @@ class LaserMapping {
     void Savetrajectory(const std::string &traj_file);
 
     // void PublishEdgeWorld(const PointCloudType::Ptr &key_points, ros::Publisher &topic);
-    void PublishKeyPointsWorld(CloudS::Ptr &key_points, ros::Publisher &topic);
+    template <typename PointT>
+    void PublishKeyPointsWorld(pcl::PointCloud<PointT> &key_points, ros::Publisher &topic);
+    void filterPointCloudWithRANSAC(PointCloudType::Ptr &pcl_in, double distanceThreshold);
 
     void Finish();
 
@@ -86,6 +91,19 @@ class LaserMapping {
     void PrintState(const state_ikfom &s);
 
    private:
+   /*
+    // 地面点去除
+    GroundSegmentationParams params;
+    std::string ground_topic, obstacle_topic;
+    bool latch;
+    std::vector<int> labels;
+    std::shared_ptr<groundRemove::SegmentationNode> ground_remove = nullptr;
+ */
+    double time_taken = 0;
+    double z_mean = 0;
+    double ground_filter_distance = 0;
+    boost::shared_ptr<PatchWorkpp<PointType>> PatchworkppGroundSeg = nullptr;
+
     /// modules
     std::shared_ptr<LidarSlam::SpinningSensorKeypointExtractor> ke = nullptr;
     // Booleans to decide whether to extract the keypoints of the relative type or not
@@ -113,6 +131,8 @@ class LaserMapping {
     std::string map_file_path_;
 
     /// point clouds data
+    CloudPtr scan_ground_{new PointCloudType()};   // scan after undistortion
+    CloudPtr scan_nonground_{new PointCloudType()};   // scan after undistortion
     CloudPtr scan_undistort_{new PointCloudType()};   // scan after undistortion
     CloudPtr scan_down_body_{new PointCloudType()};   // downsampled scan in body
     CloudPtr scan_down_world_{new PointCloudType()};  // downsampled scan in world
@@ -134,6 +154,8 @@ class LaserMapping {
     ros::Publisher pub_path_;
     ros::Publisher pub_lidar_slam_corner;
     ros::Publisher pub_lidar_slam_surf;
+    ros::Publisher pub_scan_ground;
+    ros::Publisher pub_scan_nonground;
 
 
     std::mutex mtx_buffer_;
